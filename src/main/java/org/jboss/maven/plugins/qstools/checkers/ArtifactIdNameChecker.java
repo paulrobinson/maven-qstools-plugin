@@ -27,6 +27,7 @@ import org.jboss.maven.plugins.qstools.Violation;
 import org.jboss.maven.plugins.qstools.config.ConfigurationProvider;
 import org.jboss.maven.plugins.qstools.config.Rules;
 import org.jboss.maven.plugins.qstools.xml.PositionalXMLReader;
+import org.jboss.maven.plugins.qstoolsc.common.ArtifactIdNameUtil;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 
@@ -47,12 +48,13 @@ import java.util.TreeMap;
 @Component(role = QSChecker.class, hint = "artifactIdNameChecker")
 public class ArtifactIdNameChecker implements QSChecker {
 
-    protected XPath xPath = XPathFactory.newInstance().newXPath();
-
     private int violationsQtd;
 
     @Requirement
     private ConfigurationProvider configurationProvider;
+
+    @Requirement
+    private ArtifactIdNameUtil artifactIdNameUtil;
 
     /*
      * (non-Javadoc)
@@ -96,98 +98,28 @@ public class ArtifactIdNameChecker implements QSChecker {
     @Override
     public Map<String, List<Violation>> check(MavenProject project, MavenSession mavenSession, List<MavenProject> reactorProjects, Log log) throws QSCheckerException {
 
+        Map<String, List<Violation>> results = new TreeMap<String, List<Violation>>();
+
         try {
-            Map<String, List<Violation>> results = new TreeMap<String, List<Violation>>();
-            File rootDirOfQuickstarts = getRootDirOfQuickstarts(project);
+
             Rules rules = configurationProvider.getQuickstartsRules(project.getGroupId());
-            String artifactIdPrefix = rules.getArtifactIdPrefix();
+            List<ArtifactIdNameUtil.PomInformation> pomsWithInvalidArtifactIds =  artifactIdNameUtil.findAllIncorrectArtifactIdNames(reactorProjects, rules);
 
-            for (MavenProject subProject : reactorProjects) {
-
-                Document doc = PositionalXMLReader.readXML(new FileInputStream(subProject.getFile()));
-
-                String expectedArtifactId = createArtifactId(artifactIdPrefix, rootDirOfQuickstarts, subProject.getBasedir());
-                Node actualArtifactId = ((Node) xPath.evaluate("/project/artifactId", doc, XPathConstants.NODE));
-
-                if (!expectedArtifactId.equals(actualArtifactId.getTextContent())) {
-
-                    int lineNumber = getLineNumberFromNode(actualArtifactId);
-                    String rootDirectory = (mavenSession.getExecutionRootDirectory() + File.separator).replace("\\", "\\\\");
-                    String fileAsString = subProject.getFile().getAbsolutePath().replace(rootDirectory, "");
-                    if (results.get(fileAsString) == null) {
-                        results.put(fileAsString, new ArrayList<Violation>());
-                    }
-                    String msg = "Project with the following artifactId [%s] doesn't match the required format. It should be: [%s]";
-                    results.get(fileAsString).add(new Violation(getClass(), lineNumber, String.format(msg, actualArtifactId.getTextContent(), expectedArtifactId)));
-                    violationsQtd++;
+            for (ArtifactIdNameUtil.PomInformation pi : pomsWithInvalidArtifactIds) {
+                String rootDirectory = (mavenSession.getExecutionRootDirectory() + File.separator).replace("\\", "\\\\");
+                String fileAsString = pi.getProject().getFile().getAbsolutePath().replace(rootDirectory, "");
+                if (results.get(fileAsString) == null) {
+                    results.put(fileAsString, new ArrayList<Violation>());
                 }
-
+                String msg = "Project with the following artifactId [%s] doesn't match the required format. It should be: [%s]";
+                results.get(fileAsString).add(new Violation(getClass(), pi.getLine(), String.format(msg, pi.getActualArtifactId(), pi.getExpectedArtifactId())));
+                violationsQtd++;
             }
+
             return results;
         } catch (Exception e) {
             throw new QSCheckerException(e);
         }
     }
 
-    /**
-     * (non-Javadoc)
-     * <p/>
-     * Walks up the parent directories looking for the last containing a pom.xml with the same groupId as the
-     * specified project.
-     */
-    private File getRootDirOfQuickstarts(MavenProject project) throws Exception {
-
-        File dirToCheck = project.getBasedir();
-        File resultDir = project.getBasedir();
-        while (containsPomWithGroupId(dirToCheck, project.getGroupId())) {
-            resultDir = dirToCheck;
-            dirToCheck = dirToCheck.getParentFile();
-        }
-
-        return resultDir;
-    }
-
-    /**
-     * (non-Javadoc)
-     * <p/>
-     * Checks if the specified dir contains a pom.xml and if so, whether it is related (same groupId)
-     */
-    private boolean containsPomWithGroupId(File dir, String expectedGroupId) throws Exception {
-
-        File pom = new File(dir + File.separator + "pom.xml");
-
-        if (!pom.exists()) {
-            return false;
-        }
-
-        Document doc = PositionalXMLReader.readXML(new FileInputStream(pom));
-        Node actualGroupId = (Node) xPath.evaluate("/project/groupId", doc, XPathConstants.NODE);
-
-        //If groupId missing, then take from parent
-        if (actualGroupId == null) {
-            actualGroupId = (Node) xPath.evaluate("/project/parent/groupId", doc, XPathConstants.NODE);
-        }
-
-        return actualGroupId.getTextContent().equals(expectedGroupId);
-    }
-
-    private String createArtifactId(String artifactPrefix, File rootDirOfQuickstarts, File moduleBaseDir) {
-
-        if (rootDirOfQuickstarts.equals(moduleBaseDir)) {
-            return artifactPrefix + "quickstart-parent";
-        } else {
-            String modulePath = moduleBaseDir.getPath().substring(rootDirOfQuickstarts.getPath().length());
-            //Remove preceding '-'
-            modulePath = modulePath.substring(1);
-            return artifactPrefix + modulePath.replace(File.separatorChar, '-');
-        }
-    }
-
-    protected int getLineNumberFromNode(Node node) {
-
-        if (node == null) {
-            return 0;
-        }
-        return (Integer) node.getUserData(PositionalXMLReader.BEGIN_LINE_NUMBER_KEY_NAME);
-    }
 }
