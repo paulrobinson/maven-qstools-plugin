@@ -74,7 +74,7 @@ public class ArtifactIdNameFixer implements QSFixer {
 
                 Document doc = PositionalXMLReader.readXML(new FileInputStream(subProject.getFile()));
                 Node parentArtifactIdNode = (Node) xPath.evaluate("/project/parent/artifactId", doc, XPathConstants.NODE);
-                if (parentArtifactIdNode != null) {
+                if (parentArtifactIdNode != null && subProject.getParentFile() != null) {
                     Document parentDoc = PositionalXMLReader.readXML(new FileInputStream(subProject.getParentFile()));
                     Node artifactIdNode = (Node) xPath.evaluate("/project/artifactId", parentDoc, XPathConstants.NODE);
 
