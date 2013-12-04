@@ -73,6 +73,12 @@ public class ArtifactIdNameFixer implements QSFixer {
             for (MavenProject subProject : reactorProjects) {
 
                 Document doc = PositionalXMLReader.readXML(new FileInputStream(subProject.getFile()));
+                
+                // If the parent is "jboss-parent", we are at the top and can stop
+                if ("jboss-parent".equals(xPath.evaluate("/project/parent/artifactId", doc))) {
+                       break;
+                    } 
+                    
                 Node parentArtifactIdNode = (Node) xPath.evaluate("/project/parent/artifactId", doc, XPathConstants.NODE);
                 if (parentArtifactIdNode != null) {
                     Document parentDoc = PositionalXMLReader.readXML(new FileInputStream(subProject.getParentFile()));
